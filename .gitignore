@@ -3,7 +3,5 @@
 __pycache__/
 data/raw/
 data/tmdb/
-data/processed/train.parquet
-data/processed/test.parquet
-data/processed/validation.parquet
-data/processed/tmdb_movies.csv
+data/processed/
+
