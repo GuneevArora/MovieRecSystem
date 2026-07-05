@@ -1,60 +1,248 @@
 from pathlib import Path
+
 import duckdb
 
-RAW_RATINGS = "data/raw/ml-32m/ratings.csv"
-PROCESSED_DIR = Path("data/processed")
 
-PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+# ============================================
+# Configuration
+# ============================================
+
+RAW_RATINGS = (
+    "data/raw/ml-32m/ratings.csv"
+)
+
+PROCESSED_DIR = Path(
+    "data/processed"
+)
+
+PROCESSED_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+
+# ============================================
+# Output paths
+# ============================================
+
+TRAIN_PATH = (
+    PROCESSED_DIR /
+    "train_next.parquet"
+)
+
+VALIDATION_PATH = (
+    PROCESSED_DIR /
+    "validation_next.parquet"
+)
+
+TEST_PATH = (
+    PROCESSED_DIR /
+    "test_next.parquet"
+)
+
+
+# ============================================
+# Connect DuckDB
+# ============================================
 
 con = duckdb.connect()
 
-print("Creating chronological splits...")
+
+# ============================================
+# Explain
+# ============================================
+
+print(
+    "Creating chronological next-item splits..."
+)
+
+print(
+    "Positive interaction definition:"
+)
+
+print(
+    "rating >= 4.0"
+)
+
+
+# ============================================
+# Create positive interactions
+# ============================================
 
 query = f"""
-WITH ranked AS (
+WITH positives AS (
+
     SELECT
         userId,
         movieId,
         rating,
+        timestamp
+
+    FROM read_csv_auto(
+        '{RAW_RATINGS}'
+    )
+
+    WHERE rating >= 4.0
+),
+
+ranked AS (
+
+    SELECT
+
+        userId,
+        movieId,
+        rating,
         timestamp,
+
         ROW_NUMBER() OVER (
             PARTITION BY userId
-            ORDER BY timestamp
-        ) AS rn,
+            ORDER BY timestamp DESC
+        ) AS reverse_rank,
+
         COUNT(*) OVER (
             PARTITION BY userId
-        ) AS user_count
-    FROM read_csv_auto('{RAW_RATINGS}')
+        ) AS positive_count
+
+    FROM positives
 )
 
 SELECT
+
     userId,
     movieId,
     rating,
     timestamp,
+
     CASE
-        WHEN rn >= user_count - 1 THEN 'test'
-        WHEN rn = user_count - 2 THEN 'validation'
+
+        WHEN reverse_rank = 1
+            THEN 'test'
+
+        WHEN reverse_rank = 2
+            THEN 'validation'
+
         ELSE 'train'
+
     END AS split
+
 FROM ranked
-WHERE user_count >= 5
+
+WHERE positive_count >= 3
 """
 
-df = con.execute(query).fetchdf()
 
-print("Rows:", len(df))
+print(
+    "\nRunning split query..."
+)
 
-train = df[df["split"] == "train"]
-validation = df[df["split"] == "validation"]
-test = df[df["split"] == "test"]
 
-train.to_parquet(PROCESSED_DIR / "train.parquet", index=False)
-validation.to_parquet(PROCESSED_DIR / "validation.parquet", index=False)
-test.to_parquet(PROCESSED_DIR / "test.parquet", index=False)
+df = con.execute(
+    query
+).fetchdf()
 
-print("Train:", len(train))
-print("Validation:", len(validation))
-print("Test:", len(test))
+
+print(
+    "\nTotal positive interactions:",
+    len(df)
+)
+
+
+# ============================================
+# Split
+# ============================================
+
+train = df[
+    df["split"] == "train"
+].copy()
+
+validation = df[
+    df["split"] == "validation"
+].copy()
+
+test = df[
+    df["split"] == "test"
+].copy()
+
+
+# ============================================
+# Save
+# ============================================
+
+train.to_parquet(
+    TRAIN_PATH,
+    index=False
+)
+
+validation.to_parquet(
+    VALIDATION_PATH,
+    index=False
+)
+
+test.to_parquet(
+    TEST_PATH,
+    index=False
+)
+
+
+# ============================================
+# Statistics
+# ============================================
+
+print(
+    "\nTraining interactions:",
+    len(train)
+)
+
+print(
+    "Validation interactions:",
+    len(validation)
+)
+
+print(
+    "Test interactions:",
+    len(test)
+)
+
+
+print(
+    "\nTraining users:",
+    train["userId"].nunique()
+)
+
+print(
+    "Validation users:",
+    validation["userId"].nunique()
+)
+
+print(
+    "Test users:",
+    test["userId"].nunique()
+)
+
+
+# ============================================
+# Close
+# ============================================
 
 con.close()
+
+
+print(
+    "\nSaved:"
+)
+
+print(
+    TRAIN_PATH
+)
+
+print(
+    VALIDATION_PATH
+)
+
+print(
+    TEST_PATH
+)
+
+print(
+    "\nSplit creation complete."
+)
