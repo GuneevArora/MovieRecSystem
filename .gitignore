@@ -5,3 +5,9 @@ data/raw/
 data/tmdb/
 data/processed/
 
+
+# model checkpoints
+models/*.pt
+
+# caches
+.pytest_cache/

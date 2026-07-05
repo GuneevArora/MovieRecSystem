@@ -11,3 +11,12 @@ six==1.17.0
 tqdm==4.70.1
 tzdata==2026.4
 urllib3==2.7.0
+duckdb==1.5.5
+joblib==1.6.0
+pyarrow==25.0.1
+pytest==9.1.1
+scikit-learn==1.9.1
+sentence-transformers==6.0.1
+# install torch from the CUDA wheel index that matches your GPU:
+# pip install torch --index-url https://download.pytorch.org/whl/cu130
+torch==2.14.0
