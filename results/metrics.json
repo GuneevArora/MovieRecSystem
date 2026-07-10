@@ -1,0 +1,26 @@
+{
+  "popularity": {
+    "split": "test",
+    "users": 199899,
+    "recall@10": 0.04572309016053106,
+    "ndcg@10": 0.02316350053149987,
+    "recall@20": 0.07823951095303128,
+    "ndcg@20": 0.03129172449150557,
+    "recall@50": 0.14163152391957937,
+    "ndcg@50": 0.0438295739502192,
+    "mrr": 0.02325892888972069
+  },
+  "two_tower": {
+    "split": "test",
+    "users": 199899,
+    "recall@10": 0.23691464189415654,
+    "ndcg@10": 0.13445178944974043,
+    "recall@20": 0.3316324743995718,
+    "ndcg@20": 0.1583011273111807,
+    "recall@50": 0.4819133662499562,
+    "ndcg@50": 0.18810231902172547,
+    "mrr": 0.11775314193162387
+  },
+  "protocol": "leave-one-out next-item, full-catalog ranking, seen items filtered",
+  "checkpoint": "models/two_tower_seq_best.pt"
+}

@@ -1,395 +1,144 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class TwoTowerModel(nn.Module):
     """
-    Two-tower recommendation model.
-
-    USER TOWER
-    -----------
-    Combines:
-        1. learned user ID embedding
-        2. pooled representations of the user's recent
-           positive movie history
+    Sequential two-tower retrieval model.
 
     MOVIE TOWER
-    -----------
-    Combines:
-        1. learned movie ID embedding
-        2. multi-hot genre features
-        3. scaled TMDB numerical features
+        movie ID embedding + MLP over content features (genres + scaled TMDB
+        numericals). The content path is residual, so well-observed movies
+        lean on their ID embedding and rare movies fall back on content.
 
-    Text embeddings are intentionally NOT used by the
-    retrieval model. They are reserved for the later RAG
-    / recommendation-explanation layer.
+    USER TOWER
+        A causal Transformer over the user's most recent movies, where each
+        movie is represented by the movie tower. The hidden state at the last
+        position is the user vector. There is no per-user ID embedding, so
+        the model works for users it has never seen as long as they have at
+        least one interaction.
+
+    Scoring is a plain dot product between user and movie vectors, which
+    keeps the model servable from a vector index.
+
+    Text embeddings are intentionally not used here; they are reserved for
+    the RAG / explanation layer.
     """
 
     def __init__(
         self,
-        num_users: int,
-        num_movies: int,
-        num_genres: int,
-        numerical_dim: int,
-        embedding_dim: int = 128,
-        output_dim: int = 128,
+        genres: torch.Tensor,
+        numerical: torch.Tensor,
+        dim: int = 256,
+        max_len: int = 50,
+        num_layers: int = 2,
+        num_heads: int = 4,
+        dropout: float = 0.2,
     ):
         super().__init__()
 
-        # ========================================
-        # USER TOWER
-        # ========================================
+        num_movies = genres.shape[0]
+        self.num_movies = num_movies
+        self.pad_idx = num_movies
+        self.dim = dim
+        self.max_len = max_len
 
-        self.user_embedding = nn.Embedding(
-            num_embeddings=num_users,
-            embedding_dim=embedding_dim,
+        features = torch.cat([genres, numerical], dim=1).float()
+        self.register_buffer("features", features, persistent=False)
+
+        self.movie_embedding = nn.Embedding(num_movies, dim)
+        self.feature_mlp = nn.Sequential(
+            nn.Linear(features.shape[1], dim),
+            nn.GELU(),
+            nn.Linear(dim, dim),
         )
 
-        # Each history movie is represented by the
-        # movie tower in output_dim dimensions.
-        history_dim = output_dim
-
-        self.user_tower = nn.Sequential(
-            nn.Linear(
-                embedding_dim + history_dim,
-                256,
-            ),
-            nn.ReLU(),
-
-            nn.Dropout(0.1),
-
-            nn.Linear(
-                256,
-                output_dim,
-            ),
+        self.position_embedding = nn.Embedding(max_len, dim)
+        self.input_dropout = nn.Dropout(dropout)
+        layer = nn.TransformerEncoderLayer(
+            d_model=dim,
+            nhead=num_heads,
+            dim_feedforward=dim * 4,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
         )
-
-        # ========================================
-        # MOVIE ID EMBEDDING
-        # ========================================
-
-        self.movie_embedding = nn.Embedding(
-            num_embeddings=num_movies,
-            embedding_dim=embedding_dim,
+        self.encoder = nn.TransformerEncoder(
+            layer, num_layers=num_layers, enable_nested_tensor=False
         )
+        self.output_norm = nn.LayerNorm(dim)
 
-        # ========================================
-        # GENRE FEATURES
-        # ========================================
-
-        self.genre_projection = nn.Sequential(
-            nn.Linear(
-                num_genres,
-                64,
-            ),
-            nn.ReLU(),
+        causal = torch.triu(
+            torch.ones(max_len, max_len, dtype=torch.bool), diagonal=1
         )
-
-        # ========================================
-        # NUMERICAL TMDB FEATURES
-        # ========================================
-
-        self.numeric_projection = nn.Sequential(
-            nn.Linear(
-                numerical_dim,
-                32,
-            ),
-            nn.ReLU(),
+        self.register_buffer("causal_mask", causal, persistent=False)
+        self.register_buffer(
+            "self_mask", torch.eye(max_len, dtype=torch.bool), persistent=False
         )
+        self.num_heads = num_heads
 
-        # ========================================
-        # FINAL MOVIE REPRESENTATION
-        # ========================================
-        #
-        # movie ID embedding
-        # + genre representation
-        # + numerical representation
-        #
-        # Text is deliberately excluded.
-        # ========================================
+        nn.init.normal_(self.movie_embedding.weight, std=0.02)
+        nn.init.normal_(self.position_embedding.weight, std=0.02)
 
-        movie_input_dim = (
-            embedding_dim
-            + 64
-            + 32
-        )
+    # ------------------------------------------------------------------
+    # Movie tower
+    # ------------------------------------------------------------------
 
-        self.movie_tower = nn.Sequential(
-            nn.Linear(
-                movie_input_dim,
-                256,
-            ),
-            nn.ReLU(),
+    def item_vectors(self) -> torch.Tensor:
+        """Vectors for the whole catalog, shape [num_movies, dim]."""
+        return self.movie_embedding.weight + self.feature_mlp(self.features)
 
-            nn.Dropout(0.1),
+    # ------------------------------------------------------------------
+    # User tower
+    # ------------------------------------------------------------------
 
-            nn.Linear(
-                256,
-                output_dim,
-            ),
-        )
-
-    # ============================================
-    # Encode user from ID only
-    # ============================================
-
-    def encode_user_ids(
+    def encode_sequence(
         self,
-        users: torch.Tensor,
-    ) -> torch.Tensor:
-
-        user_vector = self.user_embedding(
-            users
-        )
-
-        return F.normalize(
-            user_vector,
-            dim=-1,
-        )
-
-    # ============================================
-    # Encode movies
-    # ============================================
-
-    def encode_movies(
-        self,
-        movies: torch.Tensor,
-        genres: torch.Tensor,
-        numerical: torch.Tensor,
+        history: torch.Tensor,
+        item_vectors: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
-        Encode movies into normalized retrieval vectors.
+        history: [B, L] movie indices, left-padded with `pad_idx`, L <= max_len.
 
-        Parameters
-        ----------
-        movies:
-            Movie indices with shape [batch_size]
-
-        genres:
-            Genre feature tensor with shape
-            [batch_size, num_genres]
-
-        numerical:
-            Scaled numerical TMDB features with shape
-            [batch_size, numerical_dim]
-
-        Returns
-        -------
-        torch.Tensor
-            Normalized movie vectors with shape
-            [batch_size, output_dim]
+        Returns hidden states [B, L, dim]; position t summarises movies 0..t.
         """
+        if item_vectors is None:
+            item_vectors = self.item_vectors()
 
-        # ----------------------------------------
-        # Movie ID embedding
-        # ----------------------------------------
-
-        movie_embedding = self.movie_embedding(
-            movies
+        length = history.shape[1]
+        is_real = history != self.pad_idx
+        padded = torch.cat(
+            [item_vectors, item_vectors.new_zeros(1, self.dim)], dim=0
         )
 
-        # ----------------------------------------
-        # Genre representation
-        # ----------------------------------------
-
-        genre_embedding = self.genre_projection(
-            genres
+        # positions are right-aligned so the newest movie always gets the
+        # same position embedding regardless of history length
+        positions = torch.arange(
+            self.max_len - length, self.max_len, device=history.device
         )
+        x = padded[history] * (self.dim ** 0.5) + self.position_embedding(positions)
+        x = self.input_dropout(x) * is_real.unsqueeze(-1)
 
-        # ----------------------------------------
-        # Numerical representation
-        # ----------------------------------------
+        # Block attention to future positions and to padding. Every position
+        # may still attend to itself, so fully-padded prefixes never produce
+        # an empty attention row.
+        blocked = self.causal_mask[:length, :length].unsqueeze(0) | ~is_real.unsqueeze(1)
+        blocked = blocked & ~self.self_mask[:length, :length].unsqueeze(0)
+        blocked = blocked.repeat_interleave(self.num_heads, dim=0)
 
-        numerical_embedding = (
-            self.numeric_projection(
-                numerical
-            )
-        )
+        x = self.encoder(x, mask=blocked)
+        return self.output_norm(x) * is_real.unsqueeze(-1)
 
-        # ----------------------------------------
-        # Combine features
-        # ----------------------------------------
-
-        x = torch.cat(
-            [
-                movie_embedding,
-                genre_embedding,
-                numerical_embedding,
-            ],
-            dim=-1,
-        )
-
-        # ----------------------------------------
-        # Movie tower
-        # ----------------------------------------
-
-        x = self.movie_tower(
-            x
-        )
-
-        return F.normalize(
-            x,
-            dim=-1,
-        )
-
-    # ============================================
-    # Encode user from movie history
-    # ============================================
-
-    def encode_users_from_history(
+    def encode_users(
         self,
-        users: torch.Tensor,
-        history_movie_vectors: torch.Tensor,
-        history_mask: torch.Tensor,
+        history: torch.Tensor,
+        item_vectors: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """
-        Build a user representation from recent positive
-        movie history plus the learned user ID embedding.
+        """User vectors [B, dim] from the most recent position."""
+        return self.encode_sequence(history, item_vectors)[:, -1]
 
-        Parameters
-        ----------
-        users:
-            Tensor with shape [batch_size]
-
-        history_movie_vectors:
-            Tensor with shape
-            [batch_size, history_length, output_dim]
-
-        history_mask:
-            Boolean tensor with shape
-            [batch_size, history_length]
-
-        Returns
-        -------
-        torch.Tensor
-            Normalized user vectors with shape
-            [batch_size, output_dim]
-        """
-
-        # ----------------------------------------
-        # Convert boolean mask to float
-        # ----------------------------------------
-
-        mask = history_mask.unsqueeze(
-            -1
-        ).float()
-
-        # ----------------------------------------
-        # Mask padded history entries
-        # ----------------------------------------
-
-        masked_vectors = (
-            history_movie_vectors *
-            mask
-        )
-
-        # ----------------------------------------
-        # Mean-pool valid history movies
-        # ----------------------------------------
-
-        history_sum = masked_vectors.sum(
-            dim=1
-        )
-
-        history_count = (
-            mask.sum(
-                dim=1
-            ).clamp(
-                min=1.0
-            )
-        )
-
-        history_vector = (
-            history_sum /
-            history_count
-        )
-
-        # ----------------------------------------
-        # User ID embedding
-        # ----------------------------------------
-
-        user_id_vector = self.user_embedding(
-            users
-        )
-
-        # ----------------------------------------
-        # Combine user ID + history
-        # ----------------------------------------
-
-        x = torch.cat(
-            [
-                user_id_vector,
-                history_vector,
-            ],
-            dim=-1,
-        )
-
-        # ----------------------------------------
-        # User tower
-        # ----------------------------------------
-
-        x = self.user_tower(
-            x
-        )
-
-        return F.normalize(
-            x,
-            dim=-1,
-        )
-
-    # ============================================
-    # Forward
-    # ============================================
-
-    def forward(
-        self,
-        users: torch.Tensor,
-        positive_history_vectors: torch.Tensor,
-        history_mask: torch.Tensor,
-        movies: torch.Tensor,
-        genres: torch.Tensor,
-        numerical: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Compute user-movie similarity scores.
-
-        This method is primarily useful for diagnostics.
-        Training can also directly use encode_users_from_history()
-        and encode_movies().
-        """
-
-        # ----------------------------------------
-        # User representation
-        # ----------------------------------------
-
-        user_vectors = (
-            self.encode_users_from_history(
-                users,
-                positive_history_vectors,
-                history_mask,
-            )
-        )
-
-        # ----------------------------------------
-        # Movie representation
-        # ----------------------------------------
-
-        movie_vectors = self.encode_movies(
-            movies,
-            genres,
-            numerical,
-        )
-
-        # ----------------------------------------
-        # Dot-product similarity
-        # ----------------------------------------
-
-        scores = (
-            user_vectors *
-            movie_vectors
-        ).sum(
-            dim=-1
-        )
-
-        return scores
+    def forward(self, history: torch.Tensor) -> torch.Tensor:
+        """Scores for every movie, shape [B, num_movies]."""
+        item_vectors = self.item_vectors()
+        return self.encode_users(history, item_vectors) @ item_vectors.T
