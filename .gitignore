@@ -12,3 +12,5 @@ models/*.pt
 # caches
 .pytest_cache/
 results/train_log.txt
+artifacts/
+.claude/
