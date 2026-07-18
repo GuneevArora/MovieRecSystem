@@ -37,6 +37,7 @@ class Movie(BaseModel):
     year: int | None = None
     genres: list[str] = []
     tmdb_id: int | None = None
+    poster_path: str | None = None
     overview: str | None = None
     director: str | None = None
     cast: list[str] = []

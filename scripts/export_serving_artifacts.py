@@ -30,6 +30,22 @@ def split_pipe(value) -> list[str]:
     return [part.strip() for part in value.split("|") if part.strip()]
 
 
+def load_poster_paths(tmdb_ids, raw_dir: Path = Path("data/tmdb/raw")) -> list:
+    """Poster path from the raw TMDB responses, None where unavailable."""
+    posters = []
+    for tmdb_id in tmdb_ids:
+        path = None
+        if pd.notna(tmdb_id):
+            raw_file = raw_dir / f"{int(tmdb_id)}.json"
+            if raw_file.exists():
+                try:
+                    path = json.loads(raw_file.read_text(encoding="utf-8")).get("poster_path")
+                except (json.JSONDecodeError, OSError):
+                    path = None
+        posters.append(path or None)
+    return posters
+
+
 def build_movie_table(seqs) -> pd.DataFrame:
     with open("models/idx_to_movie.json") as f:
         idx_to_movie = {int(k): int(v) for k, v in json.load(f).items()}
@@ -52,6 +68,7 @@ def build_movie_table(seqs) -> pd.DataFrame:
             "year": rows["release_year"].fillna(year_from_title).to_numpy(),
             "genres": [split_pipe(v) for v in rows["genres_x"]],
             "tmdb_id": rows["tmdbId"].to_numpy(),
+            "poster_path": load_poster_paths(rows["tmdbId"]),
             "overview": rows["overview"].fillna("").to_numpy(),
             "director": rows["director"].fillna("").to_numpy(),
             "cast": [split_pipe(v)[:5] for v in rows["cast"]],
@@ -92,7 +109,10 @@ def main():
 
     for path in sorted(output_dir.iterdir()):
         print(f"{path}  {path.stat().st_size / 1e6:.1f} MB")
-    print(f"Movies: {len(table):,}  with overview: {(table.overview != '').mean():.1%}")
+    print(
+        f"Movies: {len(table):,}  with overview: {(table.overview != '').mean():.1%}  "
+        f"with poster: {table.poster_path.notna().mean():.1%}"
+    )
 
 
 if __name__ == "__main__":
