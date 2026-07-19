@@ -1,0 +1,7 @@
+# Runtime dependencies of the API service (see Dockerfile).
+# torch is installed separately from the CPU wheel index to keep the image small.
+fastapi==0.162.7
+uvicorn[standard]==0.54.0
+numpy==2.5.3
+pandas==3.0.5
+pyarrow==25.0.1
