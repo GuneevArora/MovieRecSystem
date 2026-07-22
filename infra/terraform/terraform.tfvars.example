@@ -1,0 +1,7 @@
+project_id = "your-gcp-project-id"
+
+# Origins of the deployed web app, plus localhost for development.
+allowed_origins = [
+  "http://localhost:3000",
+  "https://your-portfolio-domain.example",
+]

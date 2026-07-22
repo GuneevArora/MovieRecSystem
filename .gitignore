@@ -14,3 +14,8 @@ models/*.pt
 results/train_log.txt
 artifacts/
 .claude/
+
+# terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*
+infra/terraform/terraform.tfvars
