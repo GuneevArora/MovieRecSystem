@@ -111,11 +111,14 @@ def evaluate(
     max_users: int | None = None,
     max_len: int = 50,
     batch_size: int = 1024,
+    users: torch.Tensor | None = None,
 ) -> dict:
     """
     score_fn(users, hist, mask) -> [B, num_movies] scores.
+
+    users: optionally restrict evaluation to these user indices.
     """
-    users_all = data.eval_users(split, max_users)
+    users_all = data.eval_users(split, max_users) if users is None else users
     target_all = data.test_item if split == "test" else data.val_item
 
     ranks = []

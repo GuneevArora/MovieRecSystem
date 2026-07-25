@@ -99,15 +99,19 @@ class TwoTowerModel(nn.Module):
         item_vectors: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
-        history: [B, L] movie indices, left-padded with `pad_idx`, L <= max_len.
+        history: [B, L] movie indices, left-padded with `len(item_vectors)`,
+        L <= max_len.
 
         Returns hidden states [B, L, dim]; position t summarises movies 0..t.
         """
         if item_vectors is None:
             item_vectors = self.item_vectors()
 
+        # The padding index is one past the last row of `item_vectors`. This
+        # equals `pad_idx` for the trained catalog and still holds when extra
+        # cold-start movies are appended at serving time.
         length = history.shape[1]
-        is_real = history != self.pad_idx
+        is_real = history != item_vectors.shape[0]
         padded = torch.cat(
             [item_vectors, item_vectors.new_zeros(1, self.dim)], dim=0
         )

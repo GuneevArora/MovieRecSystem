@@ -30,7 +30,7 @@ export default function Home() {
               <p className="max-w-md text-sm leading-6 text-black/55">
                 A sequential two-tower model trained on 15.5 million MovieLens
                 ratings. It reads the films you pick, in order, and ranks all
-                54,732 titles in a few milliseconds.
+                56,330 titles in a few milliseconds.
               </p>
               <a
                 href="#demo"

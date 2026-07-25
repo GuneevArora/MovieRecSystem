@@ -17,19 +17,30 @@ from src.model import TwoTowerModel
 
 
 class Recommender:
-    def __init__(self, model: TwoTowerModel, movies: pd.DataFrame, device: str = "cpu"):
+    def __init__(
+        self,
+        model: TwoTowerModel,
+        movies: pd.DataFrame,
+        device: str = "cpu",
+        extra_item_vectors: torch.Tensor | None = None,
+    ):
         """
-        movies: one row per movie_idx, in order, with at least the columns
+        movies: one row per movie, in index order, with at least the columns
         movie_id, title, year, genres, popularity.
+
+        extra_item_vectors: vectors for cold-start movies that the model has
+        no ID embedding for (see src/cold_start.py). Their rows come after
+        the model's own movies in `movies`.
         """
         self.device = device
         self.model = model.to(device).eval()
         self.movies = movies.reset_index(drop=True)
         self.num_movies = len(self.movies)
-        if self.num_movies != model.num_movies:
+        num_extra = 0 if extra_item_vectors is None else len(extra_item_vectors)
+        if self.num_movies != model.num_movies + num_extra:
             raise ValueError(
-                f"Movie table has {self.num_movies} rows but the model expects "
-                f"{model.num_movies}."
+                f"Movie table has {self.num_movies} rows but the model has "
+                f"{model.num_movies} movies plus {num_extra} cold-start vectors."
             )
 
         self.id_to_idx = {
@@ -42,11 +53,26 @@ class Recommender:
 
         popularity = self.movies["popularity"].to_numpy()
         self._popular_order = np.argsort(-popularity, kind="stable")
+
+        # Search ordering. Cold-start movies have no ratings, so the table can
+        # carry a `search_weight` that places them among comparable films.
+        weight = (
+            self.movies["search_weight"].to_numpy()
+            if "search_weight" in self.movies
+            else popularity
+        )
         self._popularity_rank = np.empty(self.num_movies, dtype=np.int64)
-        self._popularity_rank[self._popular_order] = np.arange(self.num_movies)
+        self._popularity_rank[np.argsort(-weight, kind="stable")] = np.arange(
+            self.num_movies
+        )
 
         with torch.inference_mode():
-            self.item_vectors = self.model.item_vectors().contiguous()
+            item_vectors = self.model.item_vectors()
+            if num_extra:
+                item_vectors = torch.cat(
+                    [item_vectors, extra_item_vectors.to(device, item_vectors.dtype)]
+                )
+            self.item_vectors = item_vectors.contiguous().clone()
             self.item_vectors_normalized = F.normalize(self.item_vectors, dim=-1)
 
     # ------------------------------------------------------------------
@@ -64,7 +90,12 @@ class Recommender:
         )
         model.load_state_dict(bundle["model_state_dict"])
         movies = pd.read_parquet(artifact_dir / "movies.parquet")
-        return cls(model, movies, device=device)
+        return cls(
+            model,
+            movies,
+            device=device,
+            extra_item_vectors=bundle.get("extra_item_vectors"),
+        )
 
     # ------------------------------------------------------------------
     # Lookups
@@ -149,9 +180,8 @@ class Recommender:
         """
         max_len = self.model.max_len
         length = min(max_len, max(len(indices) for indices, _ in requests))
-        history = torch.full(
-            (len(requests), length), self.model.pad_idx, dtype=torch.long
-        )
+        # padding index = one past the last movie (see TwoTowerModel.encode_sequence)
+        history = torch.full((len(requests), length), self.num_movies, dtype=torch.long)
         seen_rows, seen_cols = [], []
         for row, (indices, _) in enumerate(requests):
             recent = indices[-length:]

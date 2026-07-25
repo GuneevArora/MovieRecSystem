@@ -140,7 +140,7 @@ export function Recommender() {
                 setSearchOpen(true);
               }}
               onFocus={() => setSearchOpen(true)}
-              placeholder="Search 54,732 films"
+              placeholder="Search 56,330 films"
               aria-label="Search films"
               className="w-full bg-transparent text-sm outline-none placeholder:text-black/35"
             />
@@ -161,7 +161,9 @@ export function Recommender() {
                         {movie.title}
                       </span>
                       <span className="block truncate text-[11px] text-black/45">
-                        {[movie.year, ...movie.genres.slice(0, 2)].filter(Boolean).join(" · ")}
+                        {[movie.year, ...movie.genres.slice(0, 2), movie.cold_start ? "New" : null]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </span>
                     </span>
                   </button>

@@ -45,6 +45,7 @@ class Movie(BaseModel):
     runtime: float | None = None
     popularity: int | None = None
     score: float | None = None
+    cold_start: bool = False
 
 
 class RecommendRequest(BaseModel):

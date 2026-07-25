@@ -1,0 +1,49 @@
+{
+  "protocol": "10% of films with enough ratings are hidden from the mapper and their vectors replaced by content-predicted ones; test-split users whose held-out film is one of them are evaluated with full-catalog ranking. The retrieval model itself did see these films during training, so this measures the mapper, not a fully unseen film.",
+  "held_out_films": 1427,
+  "mean_cosine_to_true_vector": 0.6509582996368408,
+  "true_vectors": {
+    "split": "test",
+    "users": 16312,
+    "recall@10": 0.2007111329082884,
+    "ndcg@10": 0.11032985267656996,
+    "recall@20": 0.2897253555664542,
+    "ndcg@20": 0.1327187126507766,
+    "recall@50": 0.44127023050514963,
+    "ndcg@50": 0.16281141323530088,
+    "mrr": 0.0972233007396211
+  },
+  "content_predicted_vectors": {
+    "split": "test",
+    "users": 16312,
+    "recall@10": 0.10617949975478176,
+    "ndcg@10": 0.054358076690148936,
+    "recall@20": 0.1625183913683178,
+    "ndcg@20": 0.06849082762467086,
+    "recall@50": 0.2695561549779304,
+    "ndcg@50": 0.08966297817717761,
+    "mrr": 0.04911628478635283
+  },
+  "mapper_without_anchoring": {
+    "split": "test",
+    "users": 16312,
+    "recall@10": 0.054806277587052483,
+    "ndcg@10": 0.033794923779796,
+    "recall@20": 0.07491417361451692,
+    "ndcg@20": 0.03882955942301019,
+    "recall@50": 0.11206473761647867,
+    "ndcg@50": 0.04613864744568467,
+    "mrr": 0.032013634128123594
+  },
+  "mean_vector_baseline": {
+    "split": "test",
+    "users": 16312,
+    "recall@10": 0.0,
+    "ndcg@10": 0.0,
+    "recall@20": 0.0,
+    "ndcg@20": 0.0,
+    "recall@50": 0.0,
+    "ndcg@50": 0.0,
+    "mrr": 0.00010960182756492888
+  }
+}

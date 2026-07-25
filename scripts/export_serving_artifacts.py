@@ -74,12 +74,48 @@ def build_movie_table(seqs) -> pd.DataFrame:
             "cast": [split_pipe(v)[:5] for v in rows["cast"]],
             "vote_average": rows["vote_average"].to_numpy(),
             "runtime": rows["runtime"].to_numpy(),
+            "vote_count": rows["vote_count"].fillna(0).to_numpy(),
             "popularity": seqs.item_counts(),
         }
     )
     table["year"] = table["year"].astype("Int64")
     table["tmdb_id"] = table["tmdb_id"].astype("Int64")
+    table["cold_start"] = False
+    table["search_weight"] = table["popularity"].astype(float)
     return table
+
+
+def append_cold_start(table: pd.DataFrame):
+    """
+    Add post-cut-off releases produced by `python -m src.cold_start`.
+
+    Returns (table, vectors); vectors is None when there are none.
+    """
+    movies_file = Path("data/processed/cold_start_movies.parquet")
+    vectors_file = Path("data/processed/cold_start_vectors.npy")
+    if not (movies_file.exists() and vectors_file.exists()):
+        return table, None
+
+    new = pd.read_parquet(movies_file)
+    vectors = np.load(vectors_file)
+    new["genres"] = [list(g) for g in new["genres"]]
+    new["cast"] = [list(c) for c in new["cast"]]
+    new["movie_idx"] = np.arange(len(table), len(table) + len(new))
+    new["popularity"] = 0
+    new["cold_start"] = True
+    new["year"] = new["year"].astype("Int64")
+    new["tmdb_id"] = new["tmdb_id"].astype("Int64")
+
+    # No ratings, so for search ordering give each new film the rating count
+    # of a catalog film at the same TMDB vote-count quantile.
+    catalog_votes = np.sort(table["vote_count"].to_numpy(dtype=float))
+    catalog_popularity = np.sort(table["popularity"].to_numpy(dtype=float))
+    new["search_weight"] = np.interp(
+        new["vote_count"].to_numpy(dtype=float), catalog_votes, catalog_popularity
+    )
+
+    combined = pd.concat([table, new[table.columns]], ignore_index=True)
+    return combined, torch.from_numpy(vectors)
 
 
 def main():
@@ -91,6 +127,9 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    table, extra_vectors = append_cold_start(build_movie_table(load_sequences()))
+    table.to_parquet(output_dir / "movies.parquet", index=False)
+
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     genres, numerical = load_movie_features()
     torch.save(
@@ -100,18 +139,17 @@ def main():
             "genres": torch.from_numpy(genres),
             "numerical": torch.from_numpy(numerical),
             "validation": checkpoint.get("validation"),
+            "extra_item_vectors": extra_vectors,
         },
         output_dir / "model.pt",
     )
-
-    table = build_movie_table(load_sequences())
-    table.to_parquet(output_dir / "movies.parquet", index=False)
 
     for path in sorted(output_dir.iterdir()):
         print(f"{path}  {path.stat().st_size / 1e6:.1f} MB")
     print(
         f"Movies: {len(table):,}  with overview: {(table.overview != '').mean():.1%}  "
-        f"with poster: {table.poster_path.notna().mean():.1%}"
+        f"with poster: {table.poster_path.notna().mean():.1%}  "
+        f"cold-start: {int(table.cold_start.sum()):,}"
     )
 
 

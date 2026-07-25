@@ -16,6 +16,8 @@ export type Movie = {
   runtime: number | null;
   popularity: number | null;
   score: number | null;
+  /** True for films released after the ratings data ends; placed by content. */
+  cold_start?: boolean;
 };
 
 export type Recommendations = {

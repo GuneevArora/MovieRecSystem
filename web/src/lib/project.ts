@@ -10,7 +10,7 @@ export const metrics = [
   { value: "15.5M", label: "Interactions" },
 ];
 
-export const catalogSize = 54732;
+export const catalogSize = 56330;
 
 export const stack = [
   "PyTorch",
@@ -30,7 +30,7 @@ export const steps = [
   {
     number: "02",
     title: "Score every film",
-    body: "That vector is compared against all 54,732 films in the catalog with a dot product. Nothing is pre-filtered, so niche picks can surface.",
+    body: "That vector is compared against all 56,330 films in the catalog with a dot product. Nothing is pre-filtered, so niche picks can surface.",
   },
   {
     number: "03",

@@ -61,6 +61,14 @@ export function MovieCard({
         <div className="pointer-events-none absolute inset-0 bg-linear-to-t from-black/70 via-black/0 to-transparent" />
         <span className="absolute left-3 top-3 text-[10px] font-bold uppercase tracking-[.18em] text-white/85 drop-shadow">
           {String(rank).padStart(2, "0")}
+          {movie.cold_start && (
+            <span
+              title="Released after the ratings data ends, so it is placed by its description rather than by viewing history."
+              className="ml-2 rounded-full bg-[#d8f45d] px-2 py-0.5 tracking-[.14em] text-[#171816] drop-shadow-none"
+            >
+              New
+            </span>
+          )}
         </span>
         <button
           type="button"

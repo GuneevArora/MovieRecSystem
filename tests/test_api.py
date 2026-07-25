@@ -139,3 +139,59 @@ def test_concurrent_requests_are_batched_and_correct(client):
         got = list(pool.map(call, histories))
     for a, b in zip(expected, got):
         assert [m["movie_id"] for m in a["items"]] == [m["movie_id"] for m in b["items"]]
+
+
+def test_cold_start_movies_are_searchable_pickable_and_recommendable():
+    """Movies with no ID embedding work through appended vectors."""
+    torch.manual_seed(0)
+    base, extra = 20, 3
+    model = TwoTowerModel(
+        genres=torch.rand(base, 5),
+        numerical=torch.rand(base, 3),
+        dim=16,
+        max_len=8,
+        num_layers=1,
+        num_heads=2,
+        dropout=0.0,
+    )
+    total = base + extra
+    movies = pd.DataFrame(
+        {
+            "movie_id": [100 + i for i in range(base)] + [9000 + i for i in range(extra)],
+            "title": [f"Old {i}" for i in range(base)] + [f"Fresh {i}" for i in range(extra)],
+            "year": pd.array([2000] * base + [2025] * extra, dtype="Int64"),
+            "genres": [["Drama"]] * total,
+            "popularity": [base - i for i in range(base)] + [0] * extra,
+            "cold_start": [False] * base + [True] * extra,
+            "search_weight": [float(base - i) for i in range(base)] + [50.0, 2.0, 1.0],
+        }
+    )
+    recommender = Recommender(model, movies, extra_item_vectors=torch.randn(extra, 16))
+    assert recommender.item_vectors.shape[0] == total
+
+    # point the first new film straight at this user so it has to rank first
+    with torch.inference_mode():
+        user = recommender.model.encode_users(
+            torch.tensor([[1, 2]]), recommender.item_vectors
+        )
+        recommender.item_vectors[base] = user[0] * 100
+
+    with TestClient(create_app(recommender)) as client:
+        found = client.get("/movies/search", params={"q": "fresh"}).json()["items"]
+        assert [m["movie_id"] for m in found] == [9000, 9001, 9002]
+        assert all(m["cold_start"] for m in found)
+
+        body = client.post("/recommend", json={"movie_ids": [101, 102], "k": 3}).json()
+        assert body["items"][0]["movie_id"] == 9000
+        assert body["items"][0]["cold_start"] is True
+
+        # a new film as the only pick still yields model recommendations
+        body = client.post("/recommend", json={"movie_ids": [9001], "k": 5}).json()
+        assert body["strategy"] == "two_tower"
+        assert 9001 not in [m["movie_id"] for m in body["items"]]
+        assert len(body["items"]) == 5
+
+    # padding must not be confused with the first cold-start row
+    alone = recommender.recommend_batch([([3], 5)])[0]
+    mixed = recommender.recommend_batch([([3], 5), (list(range(8)), 5)])[0]
+    assert [m["movie_id"] for m in alone] == [m["movie_id"] for m in mixed]
