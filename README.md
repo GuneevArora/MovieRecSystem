@@ -37,7 +37,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
 ```
 
-The data is not in this repository. Download [MovieLens 32M](https://grouplens.org/datasets/movielens/32m/) into `data/raw/ml-32m/`, put a TMDB API token in `.env` as `TMDB_API_TOKEN`, then run the scripts in `scripts/` to build the splits and features.
+The data is not in this repository (see [Data](#data)). Download [MovieLens 32M](https://grouplens.org/datasets/movielens/32m/) into `data/raw/ml-32m/`, put a TMDB API token in `.env` as `TMDB_API_TOKEN`, then run the scripts in `scripts/` to build the splits and features.
 
 ```bash
 python -m src.train                           # train
@@ -60,7 +60,30 @@ python -m pytest tests                        # tests
 | `.github/workflows/` | CI (tests, lint, build) and deploy |
 | `tests/` | Model, metric and API tests |
 
-## Data and attribution
+## Data
 
-- Ratings: [MovieLens 32M](https://grouplens.org/datasets/movielens/32m/). F. Maxwell Harper and Joseph A. Konstan. 2015. *The MovieLens Datasets: History and Context.* ACM TiiS 5, 4. Used for non-commercial research; this project is not endorsed by the University of Minnesota or GroupLens.
-- Film metadata and posters: [TMDB](https://www.themoviedb.org/). This product uses the TMDB API but is not endorsed or certified by TMDB.
+The model is trained on two sources, neither of which is redistributed here.
+
+**Ratings: MovieLens 32M.** 32 million ratings from about 200,000 users, collected between January 1995 and October 2023. A rating of 4 stars or higher counts as a positive interaction, which leaves 15.9M positives across 200,143 users and 54,732 films. For each user the most recent positive is the test item, the one before it is the validation item, and the remaining 15.5M are used for training. Splitting by time per user means the model is always evaluated on something that happened after everything it trained on for that user.
+
+**Film metadata: TMDB.** Overview, genres, release year, runtime, vote statistics, director, cast and poster path for each film, fetched through the TMDB API and matched through the MovieLens `links.csv` file. The same API supplies the 1,598 films released since mid-2023 that MovieLens has no ratings for.
+
+**What is in this repository**
+
+| In the repository | Not in the repository |
+|---|---|
+| Code for every step from raw files to a served model | Raw MovieLens files (`data/raw/`) |
+| Index mappings between MovieLens ids and model indices (`models/*.json`) | TMDB responses and the merged metadata table (`data/tmdb/`, `data/processed/`) |
+| The fitted feature scaler and genre vocabulary | Trained model weights (`models/*.pt`, `artifacts/`) |
+| Measured results (`results/*.json`) | Your TMDB API token (`.env`) |
+
+To reproduce the data, download MovieLens 32M yourself and run the scripts in `scripts/` with your own TMDB token.
+
+## Licence and attribution
+
+The code is released under the [MIT licence](LICENSE). The licence covers the code only, not the datasets:
+
+- **MovieLens 32M** is provided by GroupLens for research use and may not be used for commercial or revenue-bearing purposes without their permission. F. Maxwell Harper and Joseph A. Konstan. 2015. *The MovieLens Datasets: History and Context.* ACM Transactions on Interactive Intelligent Systems 5, 4: 19:1–19:19. This project is not endorsed by the University of Minnesota or the GroupLens Research Group.
+- **TMDB** metadata and images are used under the TMDB API terms. This product uses the TMDB API but is not endorsed or certified by TMDB.
+
+A model trained on this data inherits the non-commercial restriction, so this project is a research and portfolio demo, not a commercial service.
