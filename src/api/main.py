@@ -29,6 +29,7 @@ from src.api.recommender import Recommender
 
 MAX_K = 100
 MAX_HISTORY = 500
+MAX_LIBRARY = 50_000
 
 
 class Movie(BaseModel):
@@ -61,6 +62,25 @@ class RecommendResponse(BaseModel):
     items: list[Movie]
     strategy: str
     unknown_ids: list[int] = []
+
+
+class TmdbRecommendRequest(BaseModel):
+    tmdb_ids: list[int] = Field(
+        default_factory=list,
+        max_length=MAX_HISTORY,
+        description="TMDB ids of movies the user liked, oldest first.",
+    )
+    k: int = Field(default=10, ge=1, le=MAX_K)
+    candidate_tmdb_ids: list[int] | None = Field(
+        default=None,
+        max_length=MAX_LIBRARY,
+        description="If set, rank only these films (for example a media library).",
+    )
+    exclude_tmdb_ids: list[int] = Field(
+        default_factory=list,
+        max_length=MAX_LIBRARY,
+        description="Films to leave out, on top of the ones in tmdb_ids.",
+    )
 
 
 class MovieList(BaseModel):
@@ -148,6 +168,33 @@ def create_app(recommender: Recommender | None = None) -> FastAPI:
         if not indices:
             return {"items": r.popular(body.k), "strategy": "popularity", "unknown_ids": unknown}
         items = await request.app.state.batcher.submit((indices, body.k))
+        return {"items": items, "strategy": "two_tower", "unknown_ids": unknown}
+
+    @app.post("/recommend/tmdb", response_model=RecommendResponse)
+    async def recommend_tmdb(body: TmdbRecommendRequest, request: Request):
+        """
+        Same model, addressed by TMDB id. Used by the Jellyfin plugin, which
+        knows its library by TMDB id and wants either the best films inside
+        that library (candidate_tmdb_ids) or outside it (exclude_tmdb_ids).
+        """
+        r = rec(request)
+        indices, unknown = r.tmdb_to_indices(body.tmdb_ids)
+        exclude, _ = r.tmdb_to_indices(body.exclude_tmdb_ids)
+        candidates = None
+        if body.candidate_tmdb_ids is not None:
+            candidates, _ = r.tmdb_to_indices(body.candidate_tmdb_ids)
+        if not indices:
+            hidden = set(exclude)
+            if candidates is not None:
+                hidden |= set(range(r.num_movies)) - set(candidates)
+            return {
+                "items": r.popular(body.k, exclude=hidden),
+                "strategy": "popularity",
+                "unknown_ids": unknown,
+            }
+        items = await request.app.state.batcher.submit(
+            (indices, body.k, candidates, exclude)
+        )
         return {"items": items, "strategy": "two_tower", "unknown_ids": unknown}
 
     @app.get("/movies/search", response_model=MovieList)

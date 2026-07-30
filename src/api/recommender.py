@@ -46,6 +46,14 @@ class Recommender:
         self.id_to_idx = {
             int(movie_id): idx for idx, movie_id in enumerate(self.movies["movie_id"])
         }
+        # TMDB ids let media servers (Jellyfin, Jellyseerr) talk to the model
+        # without knowing MovieLens ids. Where two rows share a TMDB id the
+        # first (a rated film, not a cold-start row) wins.
+        self.tmdb_to_idx: dict[int, int] = {}
+        if "tmdb_id" in self.movies:
+            for idx, tmdb_id in enumerate(self.movies["tmdb_id"]):
+                if pd.notna(tmdb_id):
+                    self.tmdb_to_idx.setdefault(int(tmdb_id), idx)
         self._records = self.movies.drop(columns=["movie_idx"], errors="ignore").to_dict(
             "records"
         )
@@ -156,6 +164,17 @@ class Recommender:
                 indices.append(idx)
         return indices, unknown
 
+    def tmdb_to_indices(self, tmdb_ids: list[int]) -> tuple[list[int], list[int]]:
+        """Map TMDB ids to model indices. Returns (indices, unknown_ids)."""
+        indices, unknown = [], []
+        for tmdb_id in tmdb_ids:
+            idx = self.tmdb_to_idx.get(int(tmdb_id))
+            if idx is None:
+                unknown.append(int(tmdb_id))
+            else:
+                indices.append(idx)
+        return indices, unknown
+
     @torch.inference_mode()
     def recommend(self, movie_ids: list[int], k: int = 10) -> dict:
         """
@@ -171,34 +190,44 @@ class Recommender:
         return {"items": items, "strategy": "two_tower", "unknown_ids": unknown}
 
     @torch.inference_mode()
-    def recommend_batch(self, requests: list[tuple[list[int], int]]) -> list[list[dict]]:
+    def recommend_batch(self, requests: list[tuple]) -> list[list[dict]]:
         """
         Score several users in one forward pass.
 
-        requests: (history as model indices, oldest first and non-empty, k).
-        Returns the top-k movies for each request, already-seen movies removed.
+        requests: (history, k) or (history, k, candidates, exclude).
+        history is model indices, oldest first and non-empty. candidates, if
+        given, restricts the ranking to those indices (for example the films
+        in someone's library); exclude removes indices from it. Returns the
+        top-k movies for each request, already-seen movies removed.
         """
+        requests = [(tuple(request) + (None, None))[:4] for request in requests]
         max_len = self.model.max_len
-        length = min(max_len, max(len(indices) for indices, _ in requests))
+        length = min(max_len, max(len(request[0]) for request in requests))
         # padding index = one past the last movie (see TwoTowerModel.encode_sequence)
         history = torch.full((len(requests), length), self.num_movies, dtype=torch.long)
         seen_rows, seen_cols = [], []
-        for row, (indices, _) in enumerate(requests):
+        for row, (indices, _, _, exclude) in enumerate(requests):
             recent = indices[-length:]
             history[row, length - len(recent) :] = torch.tensor(recent)
-            seen_rows.extend([row] * len(indices))
-            seen_cols.extend(indices)
+            hidden = list(indices) + list(exclude or [])
+            seen_rows.extend([row] * len(hidden))
+            seen_cols.extend(hidden)
 
         user_vectors = self.model.encode_users(history.to(self.device), self.item_vectors)
         scores = user_vectors @ self.item_vectors.T
+        for row, (_, _, candidates, _) in enumerate(requests):
+            if candidates is not None:
+                allowed = torch.zeros(self.num_movies, dtype=torch.bool, device=scores.device)
+                allowed[torch.tensor(list(candidates), dtype=torch.long)] = True
+                scores[row, ~allowed] = float("-inf")
         scores[seen_rows, seen_cols] = float("-inf")
 
-        max_k = min(max(k for _, k in requests), self.num_movies)
+        max_k = min(max(request[1] for request in requests), self.num_movies)
         top = torch.topk(scores, max_k, dim=1)
         top_indices, top_scores = top.indices.tolist(), top.values.tolist()
 
         results = []
-        for row, (_, k) in enumerate(requests):
+        for row, (_, k, _, _) in enumerate(requests):
             results.append(
                 [
                     self.movie(idx, score)

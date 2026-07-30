@@ -31,6 +31,10 @@ def client():
             "year": pd.array([2000 + i if i else None for i in range(NUM_MOVIES)], dtype="Int64"),
             "genres": [["Drama"] if i % 2 else [] for i in range(NUM_MOVIES)],
             "popularity": [NUM_MOVIES - i for i in range(NUM_MOVIES)],
+            # the last film has no TMDB match
+            "tmdb_id": pd.array(
+                [5000 + i for i in range(NUM_MOVIES - 1)] + [None], dtype="Int64"
+            ),
         }
     )
     movies.loc[3, "title"] = "The Matrix"
@@ -78,6 +82,45 @@ def test_recommend_reports_unknown_ids_but_still_recommends(client):
     body = client.post("/recommend", json={"movie_ids": [101, 999999], "k": 3}).json()
     assert body["strategy"] == "two_tower"
     assert body["unknown_ids"] == [999999]
+
+
+def test_recommend_by_tmdb_id_matches_movielens_ids(client):
+    by_id = client.post("/recommend", json={"movie_ids": [101, 105, 110], "k": 6}).json()
+    by_tmdb = client.post(
+        "/recommend/tmdb", json={"tmdb_ids": [5001, 5005, 5010, 42], "k": 6}
+    ).json()
+    assert by_tmdb["strategy"] == "two_tower"
+    assert by_tmdb["unknown_ids"] == [42]
+    assert [m["movie_id"] for m in by_tmdb["items"]] == [m["movie_id"] for m in by_id["items"]]
+    assert all(m["tmdb_id"] == m["movie_id"] + 4900 for m in by_tmdb["items"])
+
+
+def test_recommend_by_tmdb_id_within_and_outside_a_library(client):
+    history = [5001, 5005, 5010]
+    library = [5001, 5002, 5003, 5020, 5021, 99999]
+
+    inside = client.post(
+        "/recommend/tmdb",
+        json={"tmdb_ids": history, "k": 10, "candidate_tmdb_ids": library},
+    ).json()["items"]
+    # only library films, minus the watched one and the id the model lacks
+    assert sorted(m["tmdb_id"] for m in inside) == [5002, 5003, 5020, 5021]
+    scores = [m["score"] for m in inside]
+    assert scores == sorted(scores, reverse=True)
+
+    outside = client.post(
+        "/recommend/tmdb",
+        json={"tmdb_ids": history, "k": 10, "exclude_tmdb_ids": library},
+    ).json()["items"]
+    assert len(outside) == 10
+    assert not {m["tmdb_id"] for m in outside} & set(library + history)
+
+    # nothing watched yet: popularity, still respecting the library filter
+    body = client.post(
+        "/recommend/tmdb", json={"tmdb_ids": [], "k": 2, "candidate_tmdb_ids": library}
+    ).json()
+    assert body["strategy"] == "popularity"
+    assert [m["tmdb_id"] for m in body["items"]] == [5001, 5002]
 
 
 def test_recommend_validates_k(client):
