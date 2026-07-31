@@ -19,3 +19,7 @@ artifacts/
 infra/terraform/.terraform/
 infra/terraform/*.tfstate*
 infra/terraform/terraform.tfvars
+
+# jellyfin plugin build output
+jellyfin-plugin/**/bin/
+jellyfin-plugin/**/obj/

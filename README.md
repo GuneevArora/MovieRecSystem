@@ -28,6 +28,8 @@ That is 5.8× the baseline's NDCG@10. Numbers are written to `results/metrics.js
 
 **Serving** (`src/api`): FastAPI with exact top-k retrieval and dynamic micro-batching, so concurrent requests share a forward pass.
 
+**Jellyfin and Jellyseerr** (`jellyfin-plugin/`): a server plugin that reads each user's watch history, keeps a "Recommended for you" playlist of unwatched films from their own library, and lists the best films the library lacks with a one-click Jellyseerr request. It talks to the API by TMDB id through `POST /recommend/tmdb`. See [jellyfin-plugin/README.md](jellyfin-plugin/README.md).
+
 ## Run it locally
 
 ```bash
@@ -56,6 +58,7 @@ python -m pytest tests                        # tests
 | `src/` | Model, training, evaluation, cold start |
 | `src/api/` | FastAPI service |
 | `web/` | Next.js demo |
+| `jellyfin-plugin/` | Jellyfin server plugin (C#) |
 | `infra/terraform/` | Google Cloud Run infrastructure |
 | `.github/workflows/` | CI (tests, lint, build) and deploy |
 | `tests/` | Model, metric and API tests |

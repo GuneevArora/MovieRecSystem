@@ -1,0 +1,17 @@
+---
+name: "MovieRec"
+guid: "6f2d1c7e-3b0a-4e58-9c41-7a5d2e9b8f13"
+version: "1.0.0.0"
+targetAbi: "10.11.0.0"
+framework: "net9.0"
+overview: "Personal film recommendations from your watch history"
+description: >
+  Reads each user's watched films, asks the MovieRecSystem API to rank the
+  library for them, and keeps a private "Recommended for you" playlist up to
+  date. Films the library does not have can be requested through Jellyseerr.
+category: "General"
+owner: "GuneevArora"
+artifacts:
+- "Jellyfin.Plugin.MovieRec.dll"
+changelog: >
+  First version.

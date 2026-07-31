@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>MovieRec</title>
+</head>
+<body>
+<div id="MovieRecConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-checkbox">
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="MovieRecConfigForm">
+                <div class="sectionTitleContainer flex align-items-center">
+                    <h2 class="sectionTitle">MovieRec</h2>
+                </div>
+
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="ApiUrl">Recommender API URL</label>
+                    <input id="ApiUrl" type="url" is="emby-input" required />
+                    <div class="fieldDescription">Where the MovieRecSystem API runs, as seen from this server.</div>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="PlaylistName">Playlist name</label>
+                    <input id="PlaylistName" type="text" is="emby-input" />
+                    <div class="fieldDescription">Each user gets a private playlist with this name, refreshed by the scheduled task.</div>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="PlaylistSize">Films in the playlist</label>
+                    <input id="PlaylistSize" type="number" is="emby-input" min="1" max="100" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="DiscoverCount">Films to suggest from outside the library</label>
+                    <input id="DiscoverCount" type="number" is="emby-input" min="0" max="100" />
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label class="emby-checkbox-label">
+                        <input id="IncludeFavorites" type="checkbox" is="emby-checkbox" />
+                        <span>Count favourites as liked, even if unplayed</span>
+                    </label>
+                </div>
+
+                <h3>Jellyseerr (optional)</h3>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="JellyseerrUrl">Jellyseerr URL</label>
+                    <input id="JellyseerrUrl" type="url" is="emby-input" />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="JellyseerrApiKey">Jellyseerr API key</label>
+                    <input id="JellyseerrApiKey" type="password" is="emby-input" autocomplete="off" />
+                    <div class="fieldDescription">Jellyseerr &rarr; Settings &rarr; General. Stored in this plugin's configuration on the server.</div>
+                </div>
+
+                <div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                        <span>Save</span>
+                    </button>
+                </div>
+            </form>
+
+            <h3>Preview</h3>
+            <div class="fieldDescription">Recommendations for the account you are signed in with, using the saved settings.</div>
+            <button is="emby-button" type="button" id="MovieRecPreview" class="raised emby-button">
+                <span>Show my recommendations</span>
+            </button>
+            <div id="MovieRecStatus" class="fieldDescription"></div>
+            <h4 id="MovieRecLibraryTitle" style="display:none">In your library</h4>
+            <ol id="MovieRecLibrary"></ol>
+            <h4 id="MovieRecMissingTitle" style="display:none">Not in your library</h4>
+            <ol id="MovieRecMissing"></ol>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var pluginId = '6f2d1c7e-3b0a-4e58-9c41-7a5d2e9b8f13';
+            var page = document.querySelector('#MovieRecConfigPage');
+            var fields = ['ApiUrl', 'PlaylistName', 'PlaylistSize', 'DiscoverCount', 'JellyseerrUrl', 'JellyseerrApiKey'];
+
+            page.addEventListener('pageshow', function () {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    fields.forEach(function (name) {
+                        page.querySelector('#' + name).value = config[name] == null ? '' : config[name];
+                    });
+                    page.querySelector('#IncludeFavorites').checked = config.IncludeFavorites;
+                    Dashboard.hideLoadingMsg();
+                });
+            });
+
+            page.querySelector('#MovieRecConfigForm').addEventListener('submit', function (event) {
+                event.preventDefault();
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    fields.forEach(function (name) {
+                        config[name] = page.querySelector('#' + name).value.trim();
+                    });
+                    config.PlaylistSize = parseInt(config.PlaylistSize, 10) || 20;
+                    config.DiscoverCount = parseInt(config.DiscoverCount, 10) || 0;
+                    config.IncludeFavorites = page.querySelector('#IncludeFavorites').checked;
+                    ApiClient.updatePluginConfiguration(pluginId, config).then(Dashboard.processPluginConfigurationUpdateResult);
+                });
+                return false;
+            });
+
+            function line(text) {
+                var item = document.createElement('li');
+                item.textContent = text;
+                return item;
+            }
+
+            function label(title, year) {
+                return year ? title + ' (' + year + ')' : title;
+            }
+
+            page.querySelector('#MovieRecPreview').addEventListener('click', function () {
+                var status = page.querySelector('#MovieRecStatus');
+                var library = page.querySelector('#MovieRecLibrary');
+                var missing = page.querySelector('#MovieRecMissing');
+                library.textContent = '';
+                missing.textContent = '';
+                status.textContent = 'Asking the recommender...';
+
+                ApiClient.getJSON(ApiClient.getUrl('MovieRec/Recommendations')).then(function (result) {
+                    status.textContent = result.HistoryCount
+                        ? 'Based on ' + result.HistoryCount + ' films you have watched.'
+                        : 'No watched films with a TMDB id yet, so these are simply popular.';
+                    page.querySelector('#MovieRecLibraryTitle').style.display = '';
+                    page.querySelector('#MovieRecMissingTitle').style.display = '';
+
+                    result.InLibrary.forEach(function (pick) {
+                        library.appendChild(line(label(pick.Name, pick.Year)));
+                    });
+
+                    var canRequest = page.querySelector('#JellyseerrUrl').value.trim() !== '';
+                    result.Missing.forEach(function (movie) {
+                        var item = line(label(movie.title, movie.year) + ' ');
+                        if (canRequest) {
+                            var button = document.createElement('button');
+                            button.type = 'button';
+                            button.setAttribute('is', 'emby-button');
+                            button.className = 'emby-button';
+                            button.textContent = 'Request';
+                            button.addEventListener('click', function () {
+                                button.disabled = true;
+                                ApiClient.ajax({
+                                    type: 'POST',
+                                    url: ApiClient.getUrl('MovieRec/Request/' + movie.tmdb_id)
+                                }).then(function () {
+                                    button.textContent = 'Requested';
+                                }, function () {
+                                    button.textContent = 'Failed';
+                                    button.disabled = false;
+                                });
+                            });
+                            item.appendChild(button);
+                        }
+                        missing.appendChild(item);
+                    });
+                }, function () {
+                    status.textContent = 'Could not get recommendations. Check the API URL and that the service is running.';
+                });
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>
