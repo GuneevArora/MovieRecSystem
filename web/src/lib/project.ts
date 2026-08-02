@@ -34,8 +34,8 @@ export const steps = [
   },
   {
     number: "03",
-    title: "Serve in milliseconds",
-    body: "A FastAPI service batches concurrent requests into one forward pass and returns the top matches, minus what you have already seen.",
+    title: "Rank in milliseconds",
+    body: "In this demo the model runs in your browser, so there is no server to wait for. The repository also has a FastAPI service that batches concurrent requests into one forward pass.",
   },
 ];
 

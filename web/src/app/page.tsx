@@ -56,8 +56,8 @@ export default function Home() {
                   </h2>
                 </div>
                 <p className="max-w-55 text-sm leading-6 text-black/50">
-                  Every pick re-ranks the catalog. Tap + on a result to feed it
-                  back in.
+                  Every pick re-ranks the catalog, right in your browser. Tap +
+                  on a result to feed it back in.
                 </p>
               </div>
             </Reveal>

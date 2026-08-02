@@ -28,6 +28,8 @@ That is 5.8× the baseline's NDCG@10. Numbers are written to `results/metrics.js
 
 **Serving** (`src/api`): FastAPI with exact top-k retrieval and dynamic micro-batching, so concurrent requests share a forward pass.
 
+**In the browser** (`web/src/lib/engine.ts`): the demo site needs no server. The user tower is ported to TypeScript and runs in the visitor's browser against int8-quantised film vectors, a 24 MB download on first use, ranking the catalog in about 20 ms. `web/scripts/check-parity.mts` checks it against PyTorch: same top result and 11 to 12 of the top 12 in common on every test history. The site is exported as static files, so it can be hosted anywhere.
+
 **Jellyfin and Jellyseerr** (`jellyfin-plugin/`): a server plugin that reads each user's watch history, keeps a "Recommended for you" playlist of unwatched films from their own library, and lists the best films the library lacks with a one-click Jellyseerr request. It talks to the API by TMDB id through `POST /recommend/tmdb`. See [jellyfin-plugin/README.md](jellyfin-plugin/README.md).
 
 ## Run it locally
@@ -46,6 +48,7 @@ python -m src.train                           # train
 python -m src.evaluate --split test           # evaluate
 python -m scripts.export_serving_artifacts    # bundle model + catalog for the API
 uvicorn src.api.main:app --port 8000          # API, docs at /docs
+python -m scripts.export_web_model            # model files for the browser demo
 cd web && npm install && npm run dev          # demo at http://localhost:3000
 python -m pytest tests                        # tests
 ```
@@ -77,7 +80,7 @@ The model is trained on two sources, neither of which is redistributed here.
 |---|---|
 | Code for every step from raw files to a served model | Raw MovieLens files (`data/raw/`) |
 | Index mappings between MovieLens ids and model indices (`models/*.json`) | TMDB responses and the merged metadata table (`data/tmdb/`, `data/processed/`) |
-| The fitted feature scaler and genre vocabulary | Trained model weights (`models/*.pt`, `artifacts/`) |
+| The fitted feature scaler and genre vocabulary | Trained model weights (`models/*.pt`, `artifacts/`, `web/public/model/`) |
 | Measured results (`results/*.json`) | Your TMDB API token (`.env`) |
 
 To reproduce the data, download MovieLens 32M yourself and run the scripts in `scripts/` with your own TMDB token.

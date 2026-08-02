@@ -7,12 +7,18 @@ import {
   type Recommendations,
   getMovie,
   recommend,
+  runsInBrowser,
   searchMovies,
 } from "@/lib/api";
+import { getEngine, onModelProgress } from "@/lib/local";
 import { catalogSize, presets } from "@/lib/project";
 import { MovieCard, Poster } from "@/components/MovieCard";
 
 const MAX_PICKS = 50;
+
+const UNAVAILABLE = runsInBrowser
+  ? "The model could not be downloaded. Check your connection and try again."
+  : "The recommender API is not reachable right now. If the service was idle it may be waking up, so try again in a few seconds.";
 
 export function Recommender() {
   const [picks, setPicks] = useState<Movie[]>([]);
@@ -22,7 +28,19 @@ export function Recommender() {
   const [recs, setRecs] = useState<Recommendations | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
   const searchBox = useRef<HTMLDivElement>(null);
+
+  // Download progress of the in-browser model (stays at 0 when using the API).
+  useEffect(() => onModelProgress(setProgress), []);
+  const downloading = runsInBrowser && progress > 0 && progress < 1;
+
+  // Start the download as soon as someone shows interest, not on page load.
+  function warmUp() {
+    if (runsInBrowser) {
+      getEngine().catch(() => setError(UNAVAILABLE));
+    }
+  }
 
   // Debounced title search.
   useEffect(() => {
@@ -39,7 +57,7 @@ export function Recommender() {
         })
         .catch((reason) => {
           if (reason.name !== "AbortError") {
-            setError("The recommender API is not reachable right now.");
+            setError(UNAVAILABLE);
           }
         });
     }, 180);
@@ -67,7 +85,7 @@ export function Recommender() {
       })
       .catch((reason) => {
         if (reason.name !== "AbortError") {
-          setError("The recommender API is not reachable right now.");
+          setError(UNAVAILABLE);
           setLoading(false);
         }
       });
@@ -115,7 +133,7 @@ export function Recommender() {
       updatePicks(await Promise.all(ids.map(getMovie)));
       setError(null);
     } catch {
-      setError("The recommender API is not reachable right now.");
+      setError(UNAVAILABLE);
       setLoading(false);
     }
   }
@@ -139,7 +157,10 @@ export function Recommender() {
                 setQuery(event.target.value);
                 setSearchOpen(true);
               }}
-              onFocus={() => setSearchOpen(true)}
+              onFocus={() => {
+                setSearchOpen(true);
+                warmUp();
+              }}
               placeholder="Search 56,330 films"
               aria-label="Search films"
               className="w-full bg-transparent text-sm outline-none placeholder:text-black/35"
@@ -219,6 +240,11 @@ export function Recommender() {
             </li>
           ))}
         </ul>
+        {downloading && picks.length === 0 && (
+          <div className="mt-4">
+            <ModelProgress fraction={progress} />
+          </div>
+        )}
         {picks.length > 1 && (
           <p className="mt-3 text-[11px] leading-5 text-black/40">
             Order matters: the model reads these oldest to newest, so later
@@ -241,15 +267,14 @@ export function Recommender() {
                 <Gauge size={13} />
               )}
               {catalogSize.toLocaleString("en-US")} films ranked in{" "}
-              {recs.serverMs.toFixed(0)} ms
+              {recs.serverMs.toFixed(0)} ms{runsInBrowser ? " in your browser" : ""}
             </p>
           )}
         </div>
 
         {error && (
           <div className="rounded-sm border border-black/10 bg-[#f4f4f0] p-5 text-sm leading-6 text-black/60">
-            {error} If the service was idle it may be waking up, so try again
-            in a few seconds.
+            {error}
           </div>
         )}
 
@@ -281,10 +306,27 @@ export function Recommender() {
         )}
 
         {!error && picks.length > 0 && !recs && (
-          <div className="flex min-h-80 items-center justify-center text-black/35">
+          <div className="flex min-h-80 flex-col items-center justify-center gap-4 text-black/35">
             <LoaderCircle size={22} className="animate-spin" />
+            {downloading && <ModelProgress fraction={progress} />}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ModelProgress({ fraction }: { fraction: number }) {
+  return (
+    <div className="w-full max-w-56" role="status">
+      <p className="text-[10px] font-bold uppercase tracking-[.16em] text-black/40">
+        Downloading the model · {Math.round(fraction * 100)}%
+      </p>
+      <div className="mt-2 h-1 overflow-hidden rounded-full bg-black/10">
+        <div
+          className="h-full rounded-full bg-[#171816] transition-[width] duration-200"
+          style={{ width: `${fraction * 100}%` }}
+        />
       </div>
     </div>
   );

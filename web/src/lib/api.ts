@@ -1,6 +1,18 @@
-export const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
-).replace(/\/$/, "");
+/**
+ * Data access for the demo.
+ *
+ * By default the model runs in the visitor's browser (see engine.ts), so the
+ * site is plain static files. Set NEXT_PUBLIC_API_URL to use the FastAPI
+ * service in src/api instead; both return the same shapes.
+ */
+
+import type { Engine } from "@/lib/engine";
+import { getEngine } from "@/lib/local";
+
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
+
+/** True when ranking happens in the browser rather than on a server. */
+export const runsInBrowser = API_URL === "";
 
 export type Movie = {
   movie_id: number;
@@ -9,12 +21,7 @@ export type Movie = {
   genres: string[];
   tmdb_id: number | null;
   poster_path: string | null;
-  overview: string | null;
   director: string | null;
-  cast: string[];
-  vote_average: number | null;
-  runtime: number | null;
-  popularity: number | null;
   score: number | null;
   /** True for films released after the ratings data ends; placed by content. */
   cold_start?: boolean;
@@ -22,11 +29,32 @@ export type Movie = {
 
 export type Recommendations = {
   items: Movie[];
-  strategy: string;
-  unknown_ids: number[];
-  /** Server-side processing time reported by the API, in milliseconds. */
+  /** Time spent ranking, in milliseconds: in the browser, or as reported by the API. */
   serverMs: number | null;
 };
+
+// ---------------------------------------------------------------------
+// In the browser
+// ---------------------------------------------------------------------
+
+function toMovie(engine: Engine, index: number, score: number | null = null): Movie {
+  const c = engine.catalog;
+  return {
+    movie_id: c.movie_id[index],
+    title: c.title[index],
+    year: c.year[index],
+    genres: c.genres[index].map((genre) => c.genre_names[genre]),
+    tmdb_id: c.tmdb_id[index],
+    poster_path: c.poster_path[index],
+    director: c.director[index],
+    score,
+    cold_start: c.cold_start[index] === 1,
+  };
+}
+
+// ---------------------------------------------------------------------
+// Through the API
+// ---------------------------------------------------------------------
 
 async function request(path: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(`${API_URL}${path}`, init);
@@ -36,16 +64,30 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   return response;
 }
 
+// ---------------------------------------------------------------------
+
 export async function searchMovies(
   query: string,
   signal?: AbortSignal,
 ): Promise<Movie[]> {
+  if (runsInBrowser) {
+    const engine = await getEngine();
+    return engine.search(query, 8).map((index) => toMovie(engine, index));
+  }
   const params = new URLSearchParams({ q: query, limit: "8" });
   const response = await request(`/movies/search?${params}`, { signal });
   return (await response.json()).items;
 }
 
 export async function getMovie(movieId: number): Promise<Movie> {
+  if (runsInBrowser) {
+    const engine = await getEngine();
+    const index = engine.indexOf(movieId);
+    if (index === undefined) {
+      throw new Error(`Unknown film ${movieId}`);
+    }
+    return toMovie(engine, index);
+  }
   const response = await request(`/movies/${movieId}`);
   return response.json();
 }
@@ -55,6 +97,19 @@ export async function recommend(
   k = 12,
   signal?: AbortSignal,
 ): Promise<Recommendations> {
+  if (runsInBrowser) {
+    const engine = await getEngine();
+    const history = movieIds
+      .map((id) => engine.indexOf(id))
+      .filter((index): index is number => index !== undefined);
+    const started = performance.now();
+    const top = engine.recommend(history, k);
+    const serverMs = performance.now() - started;
+    return {
+      items: top.map((entry) => toMovie(engine, entry.index, entry.score)),
+      serverMs,
+    };
+  }
   const response = await request("/recommend", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -63,7 +118,7 @@ export async function recommend(
   });
   const serverMs = Number(response.headers.get("X-Process-Time-Ms"));
   return {
-    ...(await response.json()),
+    items: (await response.json()).items,
     serverMs: Number.isFinite(serverMs) && serverMs > 0 ? serverMs : null,
   };
 }
