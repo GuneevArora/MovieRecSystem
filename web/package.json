@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "build:cloudflare": "node scripts/build-cloudflare.mjs",
+    "deploy": "npm run build:cloudflare && npx wrangler deploy"
   },
   "dependencies": {
     "clsx": "^2.1.1",

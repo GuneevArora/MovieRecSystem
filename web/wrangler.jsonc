@@ -1,0 +1,17 @@
+// Static hosting on Cloudflare Workers, served at guneevarora.com/movierecdemo.
+//   npm run deploy
+// builds the site for that path into dist/movierecdemo and uploads it.
+// The model files in public/model/ are not in git; create them first with
+// `python -m scripts.export_web_model`.
+{
+  "name": "movierec",
+  "compatibility_date": "2026-11-16",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    { "pattern": "guneevarora.com/movierecdemo", "zone_name": "guneevarora.com" },
+    { "pattern": "guneevarora.com/movierecdemo/*", "zone_name": "guneevarora.com" }
+  ]
+}

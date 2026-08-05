@@ -6,6 +6,9 @@
 
 import { type Catalog, Engine, type Manifest, decodeFloat16 } from "@/lib/engine";
 
+/** Where the model files live; follows the site when it is hosted under a sub-path. */
+const MODEL_URL = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/model`;
+
 type Listener = (fraction: number) => void;
 
 const listeners = new Set<Listener>();
@@ -27,7 +30,7 @@ function report(value: number) {
 }
 
 async function download(name: string, onBytes: (count: number) => void) {
-  const response = await fetch(`/model/${name}`);
+  const response = await fetch(`${MODEL_URL}/${name}`);
   if (!response.ok || !response.body) {
     throw new Error(`Could not load ${name} (${response.status})`);
   }
@@ -54,7 +57,7 @@ async function download(name: string, onBytes: (count: number) => void) {
 
 async function load(): Promise<Engine> {
   const manifest: Manifest & { bytes: Record<string, number> } = await (
-    await fetch("/model/manifest.json")
+    await fetch(`${MODEL_URL}/manifest.json`)
   ).json();
   const total = Object.values(manifest.bytes).reduce((a, b) => a + b, 0);
   let loaded = 0;
